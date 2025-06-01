@@ -1,0 +1,778 @@
+#include "SPI.h"
+#include "Adafruit_GFX.h"
+#include "Adafruit_ILI9341.h"
+#include "Sprites/Sprite.h" 
+#include "Sprites/Skeleton.h"
+#include "Sprites/Heart.h"
+#include "Sprites/Bamboo.h"
+#include "Sprites/Reptil.h"
+#include "Sprites/Llama.h"
+#include "Sprites/fondo.h"
+#include "Sprites/Gemas.h"
+
+// Pines para el TFT
+#define TFT_DC 7
+#define TFT_CS 6
+#define TFT_MOSI 11
+#define TFT_CLK 13
+#define TFT_RST 10
+#define TFT_MISO 12
+#define BUZZER_PIN 3 // Buzzer
+
+// Pines para botones
+#define botonRight 18
+#define botonLeft 19
+#define botonUp 20
+#define botonDown 21
+#define botonDisparo 17 // botón para disparo
+
+// Tamaño de la pantalla
+const int XMAX = 240;
+const int YMAX = 320;
+int x = 0, y = YMAX - 32; // Posición inicial en la esquina inferior izquierda
+int x2 = XMAX-32, y2 = YMAX - 32;
+int x3 = 80, y3 = 0;
+int x4 = 104, y4 = YMAX-32;
+int xLlama = 0, yLlama = 120;
+// Tamaño del corazón
+const int heartWidth = 16;
+const int heartHeight = 16;
+int vidas=3;
+bool invulnerable = false;
+unsigned long tiempoInvulnerabilidad = 0;
+const unsigned long DURACION_INVULNERABILIDAD = 3000; // 3 segundos
+
+// Dirección
+const uint8_t UP = 0;
+const uint8_t DOWN = 1;
+const uint8_t RIGHT = 2;
+const uint8_t LEFT = 3;
+uint8_t direccionActual = RIGHT;  
+
+// Proyectil
+bool proyectilActivo = false;
+int proyectilX = 0;
+int proyectilY = 0;
+const int radioProyectil = 4;
+static unsigned long lastProyectilUpdate = 0;
+const unsigned long proyectilIntervalo = 50;
+bool skeletonVisible = true;
+bool bambooVisible = true;
+bool ReptilVisible = true;
+
+// Movimiento Skeleton
+int skeletonDirection = -1; // -1: sube, 1: baja
+const int skeletonTopLimit = YMAX - 80;
+const int skeletonBottomLimit = YMAX - 32; // Un cuarto de la pantalla
+static unsigned long lastSkeletonMove = 0;
+const unsigned long skeletonSpeed = 20; // Velocidad de movimiento en ms
+
+// Movimiento Bamboo
+int BambooDirection = 1; // -1: sube, 1: baja
+const int BambooTopLimit = 0;
+const int BambooBottomLimit = 80; // Un cuarto de la pantalla
+static unsigned long lastBambooMove = 0;
+const unsigned long bambooSpeed = 20; // Velocidad de movimiento en ms
+
+// Movimiento Reptil
+int ReptilDirection = -1; // -1: sube, 1: baja
+const int ReptilTopLimit = YMAX - 80;
+const int ReptilBottomLimit = YMAX - 16; // Un cuarto de la pantalla
+static unsigned long lastReptilMove = 0;
+const unsigned long reptilSpeed =5; // Velocidad de movimiento en ms
+
+// Movimiento Llama
+int LlamaDirection = 1; // 1: derecha, -1: izquierda
+const int llamaLeftLimit = 0;
+const int llamaRightLimit = XMAX / 2; // Mitad izquierda
+const unsigned long llamaSpeed = 20; // Velocidad de la llama en ms
+bool LlamaVisible = true;
+static unsigned long lastLlamaMove = 0;
+
+//Fondo
+int aguaX[4];
+int aguaY[4];
+struct GrupoAgua {
+    int x;  // Posición x del bloque
+    int y;  // Posición y del bloque
+    int ancho, alto;
+};
+// Array de grupos 
+GrupoAgua gruposAgua[5];
+int numGruposAgua = 0;    // Contador de grupos creados
+
+//GEMAS
+bool gema1Visible = true;
+bool gema2Visible = true;
+bool gema3Visible = true;
+bool gema4Visible = true;
+bool gema5Visible = true;
+bool gema6Visible = true;
+
+// Posiciones de las gemas 
+const int gema1X = 16, gema1Y = 48;
+const int gema2X = 220, gema2Y = 32;
+const int gema3X = 200, gema3Y = 220;
+const int gema4X = 140, gema4Y = 250;
+const int gema5X = 204, gema5Y = 32;
+const int gema6X = 100, gema6Y = 200;
+int gemasRestantes = 6;
+
+//Melodia
+int melody[] = {262, 294, 330, 349, 392, 440, 494, 523}; 
+int duration = 300;
+
+// Inicializa pantalla y canvas
+Adafruit_ILI9341 screen = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO);
+GFXcanvas16 canvas(32, 32);
+GFXcanvas16 canvas2(32, 32);
+GFXcanvas16 canvas3(16, 16);
+GFXcanvas16 canvas4(16, 16);
+GFXcanvas16 canvasLlama(16, 16);
+
+// Prototipos
+void mostrarTitulo();
+void efectoTransicion();
+void llenarFondoVerde();
+void mostrarJugador();
+void mostrarSkeleton();
+void mostrarReptil();
+void mostrarBamboo();
+void moverPlayer(uint8_t direccion);
+void moverPlayerDerecha();
+void moverPlayerIzquierda();
+void moverPlayerArriba();
+void moverPlayerAbajo();
+void moverSkeletonVertical();
+void mostrarVidas(int);
+void moverBambooVertical();
+void moverReptilVertical();
+void moverLlamaHorizontal();
+void dibujarBloquesAgua(int,int,int,int,int);
+void mostrarGemas();
+void mostrarVictoria();
+void verificarColisionGemas();
+void reproducirMelodia();
+void WinMelodia();
+void LoseMelodia();
+
+void setup() {
+    Serial.begin(9600);
+    screen.begin();
+    screen.fillScreen(ILI9341_BLACK);
+
+    // Configurar pines de entrada
+    pinMode(botonDisparo, INPUT);
+
+    // Secuencia inicial
+    mostrarTitulo();
+    efectoTransicion();
+    reproducirMelodia();
+    llenarFondoVerde();
+    mostrarJugador();
+    mostrarSkeleton();
+    mostrarBamboo();
+    mostrarReptil();
+    mostrarVidas(vidas);
+    mostrarGemas();
+    dibujarBloquesAgua(80, 100,2,1,1);   // Grupo 1
+    dibujarBloquesAgua(160, 176,1,2,1);  // Grupo 2
+    dibujarBloquesAgua(34, 280,2,2,1);   // Grupo 3
+    dibujarBloquesAgua(0, 32,2,1,1);   // Grupo 4
+    dibujarBloquesAgua(160, 160,2,1,1);   // Grupo 5
+
+    // Configurar interrupciones
+    attachInterrupt(digitalPinToInterrupt(botonRight), moverPlayerDerecha, HIGH);
+    attachInterrupt(digitalPinToInterrupt(botonLeft), moverPlayerIzquierda, HIGH);
+    attachInterrupt(digitalPinToInterrupt(botonUp), moverPlayerArriba, HIGH);
+    attachInterrupt(digitalPinToInterrupt(botonDown), moverPlayerAbajo, HIGH);
+}
+
+void loop() {
+    static int prevX = -1;
+    static int prevY = -1;
+    static int frame = 0;
+    static int count=3;
+    static int count2=6;
+    static unsigned long lastFrame = 0;
+    static int animStep = 0;
+
+    // Si el jugador se mueve, borra su posición anterior
+    if (x != prevX || y != prevY) {
+        screen.fillRect(prevX, prevY, 32, 32, ILI9341_WHITE);
+        prevX = x;
+        prevY = y;
+    }
+
+    
+    // Animación del jugador, de los enemigos y el fondo
+    if (millis() - lastFrame > 200) {
+        lastFrame = millis();
+        canvas.fillScreen(0);
+        canvas.drawRGBBitmap(0, 0, Player[animStep], 32, 32);
+        screen.drawRGBBitmap(x, y, (uint16_t*)canvas.getBuffer(), 32, 32);
+        screen.drawRGBBitmap(0, 16, fondo[count], 16, 16);
+        screen.drawRGBBitmap(16, 16, fondo[count], 16, 16);
+        count++;
+        if (count == 5){
+            count = 3;}
+        if (millis() - lastFrame > 40) {
+            screen.drawRGBBitmap(0, 0, fondo[count2], 16, 16);
+            screen.drawRGBBitmap(16, 0, fondo[count2], 16, 16);
+            count2++;
+            if (count2 == 10){
+                count2 = 6;}
+        }
+        if (skeletonVisible) {
+            moverSkeletonVertical();
+            canvas2.fillScreen(0); 
+            canvas2.drawRGBBitmap(0, 0, Skeleton[frame], 32, 32);
+            screen.drawRGBBitmap(x2, y2, (uint16_t*)canvas2.getBuffer(), 32, 32);
+        }
+
+        if (bambooVisible) {
+            moverBambooVertical();
+            canvas3.fillScreen(0); 
+            canvas3.drawRGBBitmap(0, 0, Bamboo[frame], 16, 16);
+            screen.drawRGBBitmap(x3, y3, (uint16_t*)canvas3.getBuffer(), 16, 16);
+        }
+        if (ReptilVisible) {
+            moverReptilVertical();
+            canvas4.fillScreen(0); 
+            canvas4.drawRGBBitmap(0, 0, Reptil[frame], 16, 16);
+            screen.drawRGBBitmap(x4, y4, (uint16_t*)canvas4.getBuffer(), 16, 16);
+        }
+        if (LlamaVisible) {
+            moverLlamaHorizontal();
+            canvasLlama.fillScreen(0);
+
+            if (LlamaDirection == -1) {
+                canvasLlama.drawRGBBitmap(0, 0, Llama[0], 16, 16);
+            } else if (LlamaDirection == 1) {
+                canvasLlama.drawRGBBitmap(0, 0, Llama[2], 16, 16);
+            } 
+            screen.drawRGBBitmap(xLlama, yLlama, (uint16_t*)canvasLlama.getBuffer(), 16, 16);
+        }
+        frame = (frame + 1) % 2;
+        if (direccionActual == RIGHT) {
+            animStep = frame;        // 0 o 1
+        } else if (direccionActual == LEFT) {
+            animStep = 2 + frame;    // 2 o 3
+        }
+        
+
+    }
+
+    
+
+
+    // DISPARO: si se presiona el botón y no hay proyectil activo
+    if (digitalRead(botonDisparo) == HIGH && !proyectilActivo) {
+        proyectilActivo = true;
+        if (direccionActual == RIGHT) {
+            proyectilX = x + 32;  // Desde el borde derecho del personaje
+        } else if (direccionActual == LEFT) {
+            proyectilX = x - radioProyectil;  // Desde el borde izquierdo del personaje
+        }
+        proyectilY = y + 16;  // Centro vertical del personaje
+    }
+
+    // MOVER PROYECTIL
+    if (proyectilActivo && millis() - lastProyectilUpdate >= proyectilIntervalo) {
+        lastProyectilUpdate = millis();
+        // Borrar proyectil anterior
+        screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_WHITE);
+        if (direccionActual == RIGHT) {
+            // Mover proyectil
+            proyectilX += 8;  
+        
+            if (proyectilX > XMAX) {
+                proyectilActivo = false;
+            } else {
+                screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_RED);
+            }
+        } else if (direccionActual == LEFT) {
+            // Mover proyectil
+            proyectilX -= 8;  
+        
+            if (proyectilX <0) {
+                proyectilActivo = false;
+            } else {
+                screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_RED);
+            }
+        }
+        
+    }
+    
+    // DETECCIÓN DE COLISIÓN CON EL SKELETON
+    if (proyectilActivo && skeletonVisible) {
+    // Si el proyectil está dentro del área del skeleton 
+        if (proyectilX + radioProyectil >= x2 && proyectilX - radioProyectil <= x2 + 16 &&
+            proyectilY + radioProyectil >= y2 && proyectilY - radioProyectil <= y2 + 16) {
+
+            // borrar skeleton
+            screen.fillRect(x2, y2, 32, 32, ILI9341_WHITE);
+            skeletonVisible = false;
+
+            // Desactivar proyectil
+            screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_WHITE);
+            proyectilActivo = false;
+        }
+    }
+    //DETECCIÓN DE COLISIÓN CON EL BAMBOO
+    if (proyectilActivo && bambooVisible) {
+    // Si el proyectil está dentro del área del bamboo
+        if (proyectilX + radioProyectil >= x3 && proyectilX - radioProyectil <= x3 + 16 &&
+            proyectilY + radioProyectil >= y3 && proyectilY - radioProyectil <= y3 + 16) {
+
+            // borrar skeleton
+            screen.fillRect(x3, y3, 16, 16, ILI9341_WHITE);
+            bambooVisible = false;
+
+            // Desactivar proyectil
+            screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_WHITE);
+            proyectilActivo = false;
+        }
+    }
+    //DETECCIÓN DE COLISIÓN CON EL Reptil
+    if (proyectilActivo && ReptilVisible) {
+    // Si el proyectil está dentro del área del bamboo
+        if (proyectilX + radioProyectil >= x4 && proyectilX - radioProyectil <= x4 + 16 &&
+            proyectilY + radioProyectil >= y4 && proyectilY - radioProyectil <= y4 + 16) {
+
+            // borrar reptil
+            screen.fillRect(x4, y4, 16, 16, ILI9341_WHITE);
+            ReptilVisible = false;
+
+            // Desactivar proyectil
+            screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_WHITE);
+            proyectilActivo = false;
+        }
+    }
+    // Colisión con llama
+    if (proyectilActivo && LlamaVisible) {
+        if (proyectilX + radioProyectil >= xLlama && proyectilX - radioProyectil <= xLlama + 32 &&
+            proyectilY + radioProyectil >= yLlama && proyectilY - radioProyectil <= yLlama + 32) {
+
+            screen.fillRect(xLlama, yLlama,16, 16, ILI9341_WHITE);
+            LlamaVisible = false;
+            screen.fillCircle(proyectilX, proyectilY, radioProyectil, ILI9341_WHITE);
+            proyectilActivo = false;
+        }
+    }
+
+    // FUNCIONALIDAD VIDAS
+    if (invulnerable && millis() - tiempoInvulnerabilidad >= DURACION_INVULNERABILIDAD) {
+        invulnerable = false;
+    }
+
+    if ((skeletonVisible && x < x2 + 32 && x + 32 > x2 &&y < y2 + 32 && y + 32 > y2) ||
+    (bambooVisible && x < x3 + 16 && x + 16 > x3 && y < y3 + 16 && y + 16 > y3)||(ReptilVisible && x < x4 + 16 && x + 16 > x4 && y < y4 + 16 && y + 16 > y4)
+    ||(LlamaVisible && x < xLlama + 16 && x + 16 > xLlama && y < yLlama + 16 && y + 16 > yLlama)) {
+        if (!invulnerable) {
+            vidas--;
+            mostrarVidas(vidas);
+
+            invulnerable = true;
+            tiempoInvulnerabilidad = millis();
+
+            // Verifica si se acabaron las vidas
+            if (vidas <= 0) {
+            screen.fillScreen(ILI9341_BLACK);
+
+            //GFXcanvas16 canvasD(32, 32);
+            //canvasD.fillScreen(0);
+            //canvasD.drawRGBBitmap(0, 0, Player3, 32, 32);
+            screen.drawRGBBitmap((XMAX - 32)/2, 80, Player3, 32, 32);
+
+            screen.setTextColor(ILI9341_RED);
+            screen.setTextSize(3);
+            screen.setCursor(50, 150);
+            screen.println("GAME OVER");
+            LoseMelodia();
+            while (true); // Detiene el juego
+            }
+        }
+    }
+    verificarColisionGemas();
+    if (gemasRestantes<=0) {
+    screen.fillScreen(ILI9341_BLACK);
+    mostrarVictoria();
+    WinMelodia();
+    while(true);
+    }
+
+
+
+}
+
+// Mostrar título
+void mostrarTitulo() {
+    screen.setTextColor(ILI9341_WHITE);
+
+    // Mostrar "TERRA"
+    screen.setTextSize(5);
+    int16_t x1, y1;
+    uint16_t w, h;
+    screen.getTextBounds("TERRA", 0, 0, &x1, &y1, &w, &h);
+    screen.setCursor((XMAX - w) / 2, 90);
+    screen.println("TERRA");
+
+    // Mostrar "WORLD"
+    screen.setTextSize(4);
+    screen.getTextBounds("WORLD", 0, 0, &x1, &y1, &w, &h);
+    screen.setCursor((XMAX - w) / 2, 160);
+    screen.println("WORLD");
+
+    delay(2000);
+    screen.fillScreen(ILI9341_BLACK);
+}
+
+// Efecto líneas horizontales
+void efectoTransicion() {
+    for (int y = 0; y < YMAX; y += 2) {
+        screen.drawLine(0, y, XMAX, y, ILI9341_WHITE);
+        delay(5);
+    }
+    delay(500);
+    screen.fillScreen(ILI9341_BLACK);
+}
+
+// Fondo
+void llenarFondoVerde() {
+    screen.fillScreen(ILI9341_WHITE);
+}
+
+// Dibuja el jugador en la posición inicial
+void mostrarJugador() {
+    canvas.fillScreen(0);
+    canvas.drawRGBBitmap(0, 0, Player[0], 32, 32);  // dibuja sobre el canvas
+    screen.drawRGBBitmap(x, y, (uint16_t*)canvas.getBuffer(), 32, 32);  // pinta el canvas en pantalla
+}
+
+void mostrarSkeleton() {
+    canvas2.fillScreen(0);
+    canvas2.drawRGBBitmap(0, 0, Skeleton[0], 32, 32);  // dibuja sobre el canvas
+    screen.drawRGBBitmap(x2, y2, (uint16_t*)canvas2.getBuffer(), 32, 32);  // pinta el canvas en pantalla
+}
+
+void mostrarBamboo() {
+    canvas3.fillScreen(0);
+    canvas3.drawRGBBitmap(0, 0, Bamboo[0], 16, 16);  // dibuja sobre el canvas
+    screen.drawRGBBitmap(x3, y3, (uint16_t*)canvas3.getBuffer(), 16, 16);  // pinta el canvas en pantalla
+}
+
+void mostrarReptil() {
+    canvas4.fillScreen(0);
+    canvas4.drawRGBBitmap(0, 0, Reptil[0], 16, 16);  // dibuja sobre el canvas
+    screen.drawRGBBitmap(x4, y4, (uint16_t*)canvas4.getBuffer(), 16, 16);  // pinta el canvas en pantalla
+}
+
+void mostrarVidas(int vidas) {
+  for (int i = 0; i < 3; i++) {
+    int tipo = (i < vidas) ? 1 : 0; // 1 = lleno, 0 = vacío
+    int x = 240 - (i + 1) * (heartWidth + 2); // Ajusta según resolución
+    int y = 2; // Arriba
+    screen.drawRGBBitmap(x, y, Heart[tipo], heartWidth, heartHeight);
+  }
+}
+
+void mostrarGemas(){
+    if (gema1Visible) screen.drawRGBBitmap(gema1X, gema1Y, Gemas[0], 16, 16);
+    if (gema2Visible) screen.drawRGBBitmap(gema2X, gema2Y, Gemas[1], 16, 16);
+    if (gema3Visible) screen.drawRGBBitmap(gema3X, gema3Y, Gemas[2], 16, 16);
+    if (gema4Visible) screen.drawRGBBitmap(gema4X, gema4Y, Gemas[0], 16, 16);
+    if (gema5Visible) screen.drawRGBBitmap(gema5X, gema5Y, Gemas[1], 16, 16);
+    if (gema6Visible) screen.drawRGBBitmap(gema6X, gema6Y, Gemas[0], 16, 16);
+}
+
+
+void verificarColisionGemas() {
+    // Solo verificar si el jugador se ha movido
+    static int lastX = -1, lastY = -1;
+    if (x == lastX && y == lastY) return;
+    lastX = x; lastY = y;
+
+    // Gema 1
+    if (gema1Visible && x < gema1X + 16 && x + 32 > gema1X && 
+        y < gema1Y + 16 && y + 32 > gema1Y) {
+        gema1Visible = false;
+        screen.fillRect(gema1X, gema1Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+    
+    // Gema 2
+    if (gema2Visible && x < gema2X + 16 && x + 32 > gema2X && 
+        y < gema2Y + 16 && y + 32 > gema2Y) {
+        gema2Visible = false;
+        screen.fillRect(gema2X, gema2Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+    
+    // Gema 3
+    if (gema3Visible && x < gema3X + 16 && x + 32 > gema3X && 
+        y < gema3Y + 16 && y + 32 > gema3Y) {
+        gema3Visible = false;
+        screen.fillRect(gema3X, gema3Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+    
+    // Gema 4
+    if (gema4Visible && x < gema4X + 16 && x + 32 > gema4X && 
+        y < gema4Y + 16 && y + 32 > gema4Y) {
+        gema4Visible = false;
+        screen.fillRect(gema4X, gema4Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+    
+    // Gema 5
+    if (gema5Visible && x < gema5X + 16 && x + 32 > gema5X && 
+        y < gema5Y + 16 && y + 32 > gema5Y) {
+        gema5Visible = false;
+        screen.fillRect(gema5X, gema5Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+    
+    // Gema 6
+    if (gema6Visible && x < gema6X + 16 && x + 32 > gema6X && 
+        y < gema6Y + 16 && y + 32 > gema6Y) {
+        gema6Visible = false;
+        screen.fillRect(gema6X, gema6Y, 16, 16, ILI9341_WHITE);
+        gemasRestantes--;
+    }
+}
+void dibujarBloquesAgua(int posX, int posY, int ancho, int alto, int frame) {
+    // Guardar las coordenadas y dimensiones del grupo
+    gruposAgua[numGruposAgua].x = posX;
+    gruposAgua[numGruposAgua].y = posY;
+    gruposAgua[numGruposAgua].ancho = ancho;
+    gruposAgua[numGruposAgua].alto = alto;
+    numGruposAgua++;
+    
+    // Dibujar los bloques de agua
+    for (int i = 0; i < ancho; i++) {
+        for (int j = 0; j < alto; j++) {
+            screen.drawRGBBitmap(posX + i*16, posY + j*16, fondo[frame], 16, 16);
+        }
+    }
+}
+
+
+
+bool colisionConAgua(int nuevaX, int nuevaY) {
+    for (int g = 0; g < numGruposAgua; g++) {
+        int aguaX = gruposAgua[g].x;
+        int aguaY = gruposAgua[g].y;
+        int ancho = gruposAgua[g].ancho;
+        int alto = gruposAgua[g].alto;
+
+        for (int i = 0; i < ancho; i++) {
+            for (int j = 0; j < alto; j++) {
+                int bloqueX = aguaX + i * 16;
+                int bloqueY = aguaY + j * 16;
+
+                if (nuevaX < bloqueX + 16 &&
+                    nuevaX + 32 > bloqueX &&
+                    nuevaY < bloqueY + 16 &&
+                    nuevaY + 32 > bloqueY) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+
+
+void moverPlayer(uint8_t direccion) {
+    const uint8_t delta = 2;
+    int nuevaX = x;
+    int nuevaY = y;
+    
+    switch (direccion) {
+        case UP:
+            nuevaY = y - delta;
+            break;
+        case DOWN:
+            nuevaY = y + delta;
+            break;
+        case RIGHT:
+            nuevaX = x + delta;
+            break;
+        case LEFT:
+            nuevaX = x - delta;
+            break;
+    }
+    
+    // Verificar límites de pantalla
+    if (nuevaX < 0) nuevaX = 0;
+    if (nuevaX > XMAX - 32) nuevaX = XMAX - 32;
+    if (nuevaY < 0) nuevaY = 0;
+    if (nuevaY > YMAX - 32) nuevaY = YMAX - 32;
+    
+    // Solo mover si no hay colisión con agua
+    if (!colisionConAgua(nuevaX, nuevaY)) {
+        x = nuevaX;
+        y = nuevaY;
+    }
+}
+
+
+void moverSkeletonVertical() {
+    if (millis() - lastSkeletonMove >= skeletonSpeed) {
+        lastSkeletonMove = millis();
+
+        // Borrar skeleton anterior
+        screen.fillRect(x2, y2, 32, 32, ILI9341_WHITE);
+
+        // Actualizar posición
+        y2 += skeletonDirection * 2;
+
+        // Cambiar dirección si alcanza los límites
+        if (y2 <= skeletonTopLimit) {
+            y2 = skeletonTopLimit;
+            skeletonDirection = 1;
+        } else if (y2 >= skeletonBottomLimit) {
+            y2 = skeletonBottomLimit;
+            skeletonDirection = -1;
+        }
+    }
+}
+
+void moverBambooVertical() {
+    if (millis() - lastBambooMove >= bambooSpeed) {
+        lastBambooMove = millis();
+
+        // Borrar bamboo anterior
+        screen.fillRect(x3, y3, 16, 16, ILI9341_WHITE);
+
+        // Actualizar posición
+        y3 += BambooDirection * 2;
+
+        // Cambiar dirección si alcanza los límites
+        if (y3 <= BambooTopLimit) {
+            y3 = BambooTopLimit;
+            BambooDirection = 1;
+        } else if (y3 >= BambooBottomLimit) {
+            y3 = BambooBottomLimit;
+            BambooDirection = -1;
+        }
+    }
+}
+
+void moverReptilVertical() {
+    if (millis() - lastReptilMove >= reptilSpeed) {
+        lastReptilMove = millis();
+
+        // Borrar Reptil anterior
+        screen.fillRect(x4, y4, 16, 16, ILI9341_WHITE);
+
+        // Actualizar posición
+        y4 += ReptilDirection * 2;
+
+        // Cambiar dirección si alcanza los límites
+        if (y4 <= ReptilTopLimit) {
+            y4 = ReptilTopLimit;
+            ReptilDirection = 1;
+        } else if (y4 >= ReptilBottomLimit) {
+            y4 = ReptilBottomLimit;
+            ReptilDirection = -1;
+        }
+    }
+}
+
+void moverLlamaHorizontal() {
+    if (millis() - lastLlamaMove >= llamaSpeed) {
+        lastLlamaMove = millis();
+
+        // Borrar llama anterior
+        screen.fillRect(xLlama, yLlama,16, 16, ILI9341_WHITE);
+
+        // Mover llama
+        xLlama += LlamaDirection * 4;
+
+        // Verificar límites y cambiar dirección
+        if (xLlama >= llamaRightLimit - 32) {
+            LlamaDirection = -1;
+        } else if (xLlama <= llamaLeftLimit) {
+            LlamaDirection = 1;
+        }
+    }
+}
+
+
+void mostrarVictoria() {
+  screen.setTextSize(4);
+  screen.setTextColor(ILI9341_YELLOW);
+  screen.setCursor(50, 150);
+  screen.print("YOU WIN");
+}
+
+void reproducirMelodia() {
+  for (int i = 0; i < 8; i++) {
+    tone(BUZZER_PIN, melody[i]);
+    delay(duration);
+    noTone(BUZZER_PIN);
+    delay(50);
+  }
+}
+
+void WinMelodia() {
+  tone(BUZZER_PIN, 330); 
+    delay(150);
+    tone(BUZZER_PIN, 392); 
+    delay(150);
+    tone(BUZZER_PIN, 659); 
+    delay(150);
+    tone(BUZZER_PIN, 523); 
+    delay(150);
+    tone(BUZZER_PIN, 587); 
+    delay(150);
+    tone(BUZZER_PIN, 784); 
+    delay(150);
+    noTone(BUZZER_PIN);
+}
+
+void LoseMelodia() {
+    tone(BUZZER_PIN, 622); 
+    delay(300);
+    tone(BUZZER_PIN, 587); 
+    delay(300);
+    tone(BUZZER_PIN, 554); 
+    delay(300);
+
+    // Efecto descendente:
+    for (byte i = 0; i < 10; i++) {
+    for (int pitch = -10; pitch <= 10; pitch++) {
+        tone(BUZZER_PIN, 523 + pitch);
+        delay(5);
+    }
+    }
+    noTone(BUZZER_PIN);
+
+}
+
+
+void moverPlayerDerecha() {
+    delay(100);
+    if (digitalRead(botonRight) == HIGH) moverPlayer(RIGHT) ;
+    direccionActual = RIGHT;
+}
+
+void moverPlayerIzquierda() {
+    delay(100);
+    if (digitalRead(botonLeft) == HIGH) moverPlayer(LEFT);
+    direccionActual = LEFT;
+}
+
+void moverPlayerArriba() {
+    delay(100);
+    if (digitalRead(botonUp) == HIGH) moverPlayer(UP);
+}
+
+void moverPlayerAbajo() {
+    delay(100);
+    if (digitalRead(botonDown) == HIGH) moverPlayer(DOWN);
+}
+
